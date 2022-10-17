@@ -132,6 +132,41 @@ def create_mask(pred_mask: tf.Tensor) -> tf.Tensor:
     return pred_mask
 
 
+def image_fusion(background, foreground, sharp=False, alfa=0.5):
+    img1 = background
+    img2 = foreground
+
+    rows,cols,channels = img2.shape
+    roi = img1[0:rows, 0:cols ]
+
+    img2gray = cv2.cvtColor(img2,cv2.COLOR_BGR2GRAY)
+    ret, mask = cv2.threshold(img2gray, 200, 255, cv2.THRESH_BINARY_INV)
+    mask_inv = cv2.bitwise_not(mask)
+
+    img1_hidden_bg = cv2.bitwise_and(img1, img1, mask = mask)
+    #cv2.imshow("img1_hidden_bg", img1_hidden_bg)
+
+    img1_bg = cv2.bitwise_and(roi,roi,mask = mask_inv)
+    #cv2.imshow("img1_bg", img1_bg)
+
+    img2_fg = cv2.bitwise_and(img2,img2,mask = mask)
+    #cv2.imshow("img2_fg", img2_fg)
+
+    out_img = cv2.add(img1_bg,img2_fg)
+    #cv2.imshow("out_img", out_img)
+    img1[0:rows, 0:cols ] = out_img
+
+    # cv2.imshow("Result Sharp", img1)
+
+    ALFA = 0.5
+    img1_hidden_merge = cv2.addWeighted(img1_hidden_bg, ALFA, img2_fg, 1-ALFA, 0.0)
+    img_opaque = cv2.add(img1_bg, img1_hidden_merge)
+
+    if sharp:
+        return img1
+    else:
+        return img_opaque
+
 def get_overlay(img_sample, img_pred, img_gt=None):
     # overlay between sample image, ground truth and prediction
     FOREGROUND = 1
@@ -203,10 +238,30 @@ def park_detection2(model, img):
     i1 = np.squeeze(i1)
     i1 = np.float32(i1)
 
-    overlay = get_overlay(i0, i1)
+    # overlay = get_overlay(i0, i1)
+    
+    FOREGROUND = 1
+    OFFSET = 255 - FOREGROUND
+    RED = [0,0, 255] # BGR
+    WHITE = [255,255,255]
+
+    #####
+    # fusion of sample image and foreground area from predicted image
+    #####
+    img_pred = i1
+    img_pred += OFFSET
+    img_pred=cv2.cvtColor(img_pred, cv2.COLOR_GRAY2BGR)
+    img_pred[np.all(img_pred == WHITE, axis=-1)] = RED
+    i1 = img_pred
+
+    i0 = i0.astype(np.uint8)
+    i1 = i1.astype(np.uint8)
+   
+    overlay = image_fusion(i0, i1)
+
     overlay = cv2.resize(overlay, (w_orig, h_orig))
-    overlay = np.array(overlay, dtype = np.uint8) # IMPORTANT TO USE cv2.imshow
-    cv2.imwrite("pippo.png", overlay,  [int(cv2.IMWRITE_PNG_COMPRESSION), 0])
+
+    # cv2.imwrite("pippo.png", overlay,  [int(cv2.IMWRITE_PNG_COMPRESSION), 0])
 
     return overlay
 
@@ -260,6 +315,8 @@ def main():
     else:
         print("Error opening the stream.")
         rval = False
+
+    cv2.imshow(WINDOW_NAME, frame)
 
     while rval:
 
